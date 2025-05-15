@@ -1,0 +1,23 @@
+from machine import Pin
+import time
+
+# Setup
+reed_switch = Pin(16, Pin.IN, Pin.PULL_UP)  # Pull-up makes it read HIGH when closed
+led = Pin(17, Pin.OUT)
+buzzer = Pin(18, Pin.OUT)
+
+print("Security system armed.")
+
+# Main loop
+while True:
+    if reed_switch.value() == 1:  # Open (magnet moved away)
+        print("Intruder detected!")
+        led.on()
+        buzzer.on()
+        time.sleep(0.5)
+        buzzer.off()
+        time.sleep(0.5)
+    else:  # Closed (magnet near)
+        led.off()
+        buzzer.off()
+    time.sleep(0.1)
