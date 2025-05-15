@@ -1,0 +1,12 @@
+from machine import I2C, Pin
+from pico_i2c_lcd import I2cLcd
+import time
+
+i2c = I2C(0, scl=Pin(1), sda=Pin(0))  # GP1 = SCL, GP0 = SDA
+lcd = I2cLcd(i2c, 0x27, 2, 16)        # 2 lines, 16 characters wide
+
+lcd.backlight_on()
+lcd.putstr("Hello world!")
+time.sleep(2)
+lcd.clear()
+lcd.putstr("It wor2e3232e23e23ddz22eeeeeeeeeeeeeeersks!")
