@@ -1,0 +1,91 @@
+from machine import Pin, I2C
+import time
+from pico_i2c_lcd import I2cLcd
+
+# --- Pin setup ---
+reed_switch = Pin(16, Pin.IN, Pin.PULL_UP)
+alarm_led = Pin(17, Pin.OUT)        # Alarm LED
+buzzer = Pin(18, Pin.OUT)           # Buzzer
+button = Pin(14, Pin.IN)            # Button input (external pull-down)
+armed_led = Pin(19, Pin.OUT)        # Armed status LED
+
+# --- I2C LCD setup (GP0 = SDA, GP1 = SCL) ---
+i2c = I2C(0, scl=Pin(1), sda=Pin(0))
+i2c_addr = 0x27  # You confirmed this address
+lcd = I2cLcd(i2c, i2c_addr, 2, 16)
+lcd.backlight_on()
+
+# --- System state variables ---
+alarm_on = False
+button_was_pressed = False
+arming_countdown = False
+
+print("Security system ready. Press button to toggle alarm ON/OFF.")
+lcd.putstr("System Ready")
+time.sleep(2)
+lcd.clear()
+
+while True:
+    # --- Handle button press ---
+    if button.value() == 1 and not button_was_pressed and not arming_countdown:
+        button_was_pressed = True
+        if alarm_on:
+            # Disarm instantly
+            alarm_on = False
+            lcd.clear()
+            lcd.putstr("Alarm is OFF")
+            print("Alarm is now: OFF")
+        else:
+            # Start countdown before arming
+            arming_countdown = True
+            lcd.clear()
+            print("Starting 10-sec countdown")
+
+    if button.value() == 0:
+        button_was_pressed = False
+
+    # --- Handle arming countdown ---
+    if arming_countdown:
+        for sec in range(10, 0, -1):
+            lcd.move_to(0, 0)
+            lcd.putstr("Arming in: {:2}".format(sec))
+            print("Arming in:", sec)
+            time.sleep(1)
+            # Cancel if button pressed during countdown
+            if button.value() == 1:
+                lcd.clear()
+                lcd.putstr("Arming Cancelled")
+                print("Arming cancelled")
+                time.sleep(2)
+                lcd.clear()
+                arming_countdown = False
+                break
+        else:
+            # Countdown finished, arm system
+            alarm_on = True
+            arming_countdown = False
+            lcd.clear()
+            lcd.putstr("Alarm is ON")
+            print("Alarm is now: ON")
+            time.sleep(2)
+            lcd.clear()
+
+    # --- Update armed LED ---
+    armed_led.value(alarm_on)
+
+    # --- Alarm condition: armed + reed switch open ---
+    if alarm_on and reed_switch.value() == 1:
+        alarm_led.on()
+        buzzer.on()
+        lcd.move_to(0, 0)
+        lcd.putstr("INTRUDER ALERT!")
+    else:
+        alarm_led.off()
+        buzzer.off()
+        lcd.move_to(0, 0)
+        if alarm_on:
+            lcd.putstr("System Armed   ")
+        else:
+            lcd.putstr("System Idle    ")
+
+    time.sleep(0.05)
