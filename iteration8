@@ -1,0 +1,144 @@
+from machine import Pin, I2C
+import time
+from pico_i2c_lcd import I2cLcd
+
+# --- LCD scroll effect ---
+def scroll_text(lcd, message, row=0, delay=0.2):
+    lcd.clear()
+    lcd.move_to(0, row)
+    width = 16
+    padded = " " * width + message + " " * width
+    for i in range(len(padded) - width + 1):
+        lcd.move_to(0, row)
+        lcd.putstr(padded[i:i+width])
+        time.sleep(delay)
+    lcd.clear()
+
+# --- Pin setup ---
+reed_switch = Pin(16, Pin.IN, Pin.PULL_UP)
+alarm_led = Pin(17, Pin.OUT)
+buzzer = Pin(18, Pin.OUT)
+button = Pin(14, Pin.IN)
+armed_led = Pin(19, Pin.OUT)
+
+# --- I2C LCD setup ---
+i2c = I2C(0, scl=Pin(1), sda=Pin(0))
+i2c_addr = 0x27
+lcd = I2cLcd(i2c, i2c_addr, 2, 16)
+lcd.backlight_on()
+
+# --- State variables ---
+alarm_on = False
+button_was_pressed = False
+arming_countdown = False
+countdown_start_time = 0
+countdown_duration = 10
+countdown_canceled = False
+last_button_state = 0
+button_cooldown_start = 0
+blink_alert = False
+countdown_dots = 0
+
+# --- Timers for non-blocking animation ---
+last_blink_time = time.ticks_ms()
+blink_interval = 500  # ms
+
+# --- Display intro animation ---
+scroll_text(lcd, "System Ready", row=0, delay=0.15)
+print("Security system ready. Press button to toggle alarm ON/OFF.")
+
+while True:
+    now = time.time()
+
+    # --- Handle button press ---
+    if button.value() == 1 and not button_was_pressed and not arming_countdown:
+        button_was_pressed = True
+        if alarm_on:
+            alarm_on = False
+            lcd.clear()
+            lcd.putstr("Alarm is OFF")
+            print("Alarm is now: OFF")
+            time.sleep(2)
+            lcd.clear()
+        else:
+            arming_countdown = True
+            countdown_start_time = now
+            countdown_canceled = False
+            last_button_state = 1
+            button_cooldown_start = time.ticks_ms()
+            countdown_dots = 0
+            print("Starting arming countdown")
+            lcd.clear()
+
+    if button.value() == 0:
+        button_was_pressed = False
+
+    # --- Handle arming countdown ---
+    if arming_countdown:
+        elapsed = now - countdown_start_time
+        remaining = countdown_duration - elapsed
+
+        if remaining > 0:
+            dots = "." * ((countdown_dots % 3) + 1)
+            lcd.move_to(0, 0)
+            lcd.putstr("Arming in: {:2}{}".format(int(remaining), dots))
+            lcd.move_to(0, 1)
+            lcd.putstr("Press to cancel ")
+            countdown_dots += 1
+
+            if (button.value() == 1 and
+                time.ticks_diff(time.ticks_ms(), button_cooldown_start) > 500 and
+                last_button_state == 0):
+                countdown_canceled = True
+                arming_countdown = False
+                lcd.clear()
+                lcd.putstr("Arming Cancelled")
+                print("Arming cancelled")
+                time.sleep(2)
+                lcd.clear()
+
+            last_button_state = button.value()
+        else:
+            arming_countdown = False
+            if not countdown_canceled:
+                alarm_on = True
+                lcd.clear()
+                lcd.putstr("Alarm is ON")
+                print("Alarm is now: ON")
+                time.sleep(2)
+                lcd.clear()
+
+    # --- Update armed LED ---
+    armed_led.value(alarm_on)
+
+    # --- Alarm condition ---
+    if not arming_countdown:
+        if alarm_on and reed_switch.value() == 1:
+            alarm_led.on()
+            buzzer.on()
+            if blink_alert:
+                lcd.move_to(0, 0)
+                lcd.putstr("INTRUDER ALERT!")
+            else:
+                lcd.move_to(0, 0)
+                lcd.putstr("                ")  # Blank flash
+            lcd.move_to(0, 1)
+            lcd.putstr("                ")
+        else:
+            alarm_led.off()
+            buzzer.off()
+            lcd.move_to(0, 0)
+            if alarm_on:
+                lcd.putstr("System Armed   ")
+            else:
+                lcd.putstr("System Idle    ")
+            lcd.move_to(0, 1)
+            lcd.putstr("                ")
+
+    # --- Non-blocking blink timer ---
+    if time.ticks_diff(time.ticks_ms(), last_blink_time) >= blink_interval:
+        blink_alert = not blink_alert
+        last_blink_time = time.ticks_ms()
+
+    # --- Responsive loop ---
+    time.sleep(0.05)
